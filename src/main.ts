@@ -1,0 +1,41 @@
+import { NestFactory, Reflector } from '@nestjs/core';
+import { ValidationPipe } from '@nestjs/common';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import helmet from 'helmet';
+import { AppModule } from './app.module.js';
+import { HttpExceptionFilter } from './common/filters/http-exception.filter.js';
+import { TransformInterceptor } from './common/interceptors/transform.interceptor.js';
+
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule);
+
+  app.use(helmet());
+  app.setGlobalPrefix('api');
+  app.enableCors({
+    origin: (process.env.CORS_ORIGINS ?? 'http://localhost:4000').split(','),
+    credentials: true,
+  });
+  app.useGlobalPipes(
+    new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: true }),
+  );
+  app.useGlobalFilters(new HttpExceptionFilter());
+  app.useGlobalInterceptors(new TransformInterceptor());
+
+  const reflector = app.get(Reflector);
+  void reflector; // available for guards
+
+  const config = new DocumentBuilder()
+    .setTitle('Training API')
+    .setDescription('Backend para la aplicación de coaching deportivo')
+    .setVersion('1.0')
+    .addBearerAuth()
+    .build();
+  const document = SwaggerModule.createDocument(app, config);
+  SwaggerModule.setup('api/docs', app, document);
+
+  await app.listen(process.env.PORT ?? 3000);
+  console.log(`API running on http://localhost:${process.env.PORT ?? 3000}/api`);
+  console.log(`Swagger UI at http://localhost:${process.env.PORT ?? 3000}/api/docs`);
+}
+
+bootstrap();

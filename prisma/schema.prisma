@@ -1,0 +1,395 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Auth & Users ────────────────────────────────────────
+
+enum UserRole {
+  COACH
+  ATHLETE
+  ADMIN
+}
+
+enum CoachAthleteStatus {
+  PENDING
+  ACTIVE
+  INACTIVE
+}
+
+enum AthleteTier {
+  PRO
+  AMATEUR
+}
+
+model User {
+  id           Int      @id @default(autoincrement())
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  firstName    String   @map("first_name")
+  lastName     String   @map("last_name")
+  avatarUrl    String?  @map("avatar_url")
+  role         UserRole
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  coach   Coach?
+  athlete Athlete?
+
+  @@map("users")
+}
+
+model Coach {
+  id          Int     @id @default(autoincrement())
+  userId      Int     @unique @map("user_id")
+  specialty   String?
+  bio         String?
+  maxAthletes Int     @default(20) @map("max_athletes")
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  athletes      CoachAthlete[]
+  trainingPlans TrainingPlan[]
+  exercises     Exercise[]
+
+  @@map("coaches")
+}
+
+model Athlete {
+  id                 Int         @id @default(autoincrement())
+  userId             Int         @unique @map("user_id")
+  birthDate          DateTime?   @map("birth_date") @db.Date
+  weightKg           Float?      @map("weight_kg")
+  heightCm           Float?      @map("height_cm")
+  restingHr          Int?        @map("resting_hr")
+  maxHr              Int?        @map("max_hr")
+  sportProfiles      Json?       @map("sport_profiles") @db.JsonB
+  tier               AthleteTier @default(AMATEUR)
+  gamificationLevel  Int         @default(1) @map("gamification_level")
+  gamificationXp     Int         @default(0) @map("gamification_xp")
+  gamificationXpNext Int         @default(1000) @map("gamification_xp_next")
+  streakDays         Int         @default(0) @map("streak_days")
+  primarySportTypeId Int?        @map("primary_sport_type_id")
+
+  user                User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  primarySport        SportType?           @relation(fields: [primarySportTypeId], references: [id], onDelete: SetNull)
+  coaches             CoachAthlete[]
+  trainingPlans       TrainingPlan[]
+  activities          Activity[]
+  wearableConnections WearableConnection[]
+  bodyMetrics         BodyMetric[]
+  readinessRecords    Readiness[]
+  loadSnapshots       TrainingLoadSnapshot[]
+
+  @@map("athletes")
+}
+
+model CoachAthlete {
+  id        Int                @id @default(autoincrement())
+  coachId   Int                @map("coach_id")
+  athleteId Int                @map("athlete_id")
+  status    CoachAthleteStatus @default(PENDING)
+  startedAt DateTime           @default(now()) @map("started_at")
+
+  coach   Coach   @relation(fields: [coachId], references: [id], onDelete: Cascade)
+  athlete Athlete @relation(fields: [athleteId], references: [id], onDelete: Cascade)
+
+  @@unique([coachId, athleteId])
+  @@index([athleteId, status])
+  @@map("coach_athletes")
+}
+
+// ─── Sport & Exercises ───────────────────────────────────
+
+model SportType {
+  id                Int     @id @default(autoincrement())
+  name              String  @unique
+  icon              String?
+  metricDefinitions Json?   @map("metric_definitions") @db.JsonB
+
+  exerciseCategories ExerciseCategory[]
+  exercises          Exercise[]
+  planSessions       PlanSession[]
+  activities         Activity[]
+  primaryAthletes    Athlete[]
+
+  @@map("sport_types")
+}
+
+model ExerciseCategory {
+  id          Int    @id @default(autoincrement())
+  name        String
+  sportTypeId Int    @map("sport_type_id")
+
+  sportType SportType  @relation(fields: [sportTypeId], references: [id], onDelete: Restrict)
+  exercises Exercise[]
+
+  @@map("exercise_categories")
+}
+
+model Exercise {
+  id            Int      @id @default(autoincrement())
+  categoryId    Int      @map("category_id")
+  sportTypeId   Int      @map("sport_type_id")
+  createdById   Int?     @map("created_by")
+  name          String
+  description   String?
+  videoUrl      String?  @map("video_url")
+  isGlobal      Boolean  @default(false) @map("is_global")
+  defaultParams Json?    @map("default_params") @db.JsonB
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  category      ExerciseCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  sportType     SportType        @relation(fields: [sportTypeId], references: [id], onDelete: Restrict)
+  createdBy     Coach?           @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  sessionBlocks SessionBlock[]
+
+  @@map("exercises")
+}
+
+// ─── Training Plans ──────────────────────────────────────
+
+enum PlanStatus {
+  DRAFT
+  ACTIVE
+  COMPLETED
+}
+
+enum SessionIntensity {
+  EASY
+  MODERATE
+  HARD
+}
+
+model TrainingPlan {
+  id        Int        @id @default(autoincrement())
+  coachId   Int?       @map("coach_id")
+  athleteId Int        @map("athlete_id")
+  name      String
+  startDate DateTime   @map("start_date") @db.Date
+  endDate   DateTime?  @map("end_date") @db.Date
+  status    PlanStatus @default(DRAFT)
+  goal      String?
+  createdAt DateTime   @default(now()) @map("created_at")
+  updatedAt DateTime   @updatedAt @map("updated_at")
+
+  coach   Coach?     @relation(fields: [coachId], references: [id], onDelete: SetNull)
+  athlete Athlete    @relation(fields: [athleteId], references: [id], onDelete: Cascade)
+  weeks   PlanWeek[]
+
+  @@index([athleteId, status])
+  @@map("training_plans")
+}
+
+model PlanWeek {
+  id         Int     @id @default(autoincrement())
+  planId     Int     @map("plan_id")
+  weekNumber Int     @map("week_number")
+  focus      String?
+  notes      String?
+
+  plan     TrainingPlan  @relation(fields: [planId], references: [id], onDelete: Cascade)
+  sessions PlanSession[]
+
+  @@unique([planId, weekNumber])
+  @@map("plan_weeks")
+}
+
+model PlanSession {
+  id                   Int              @id @default(autoincrement())
+  weekId               Int              @map("week_id")
+  dayOfWeek            Int              @map("day_of_week")
+  sportTypeId          Int              @map("sport_type_id")
+  title                String
+  description          String?
+  estimatedDurationMin Int?             @map("estimated_duration_min")
+  intensity            SessionIntensity @default(MODERATE)
+
+  week       PlanWeek       @relation(fields: [weekId], references: [id], onDelete: Cascade)
+  sportType  SportType      @relation(fields: [sportTypeId], references: [id], onDelete: Restrict)
+  blocks     SessionBlock[]
+  activities Activity[]
+
+  @@map("plan_sessions")
+}
+
+model SessionBlock {
+  id         Int     @id @default(autoincrement())
+  sessionId  Int     @map("session_id")
+  exerciseId Int     @map("exercise_id")
+  sortOrder  Int     @map("sort_order")
+  params     Json?   @db.JsonB
+  notes      String?
+
+  session  PlanSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  exercise Exercise    @relation(fields: [exerciseId], references: [id], onDelete: Restrict)
+
+  @@map("session_blocks")
+}
+
+// ─── Activities & Tracking ───────────────────────────────
+
+enum ActivitySource {
+  GARMIN
+  STRAVA
+  MANUAL
+}
+
+enum StreamType {
+  HR
+  PACE
+  POWER
+  CADENCE
+  GPS
+  ALTITUDE
+}
+
+model Activity {
+  id          Int            @id @default(autoincrement())
+  athleteId   Int            @map("athlete_id")
+  sessionId   Int?           @map("session_id")
+  sportTypeId Int            @map("sport_type_id")
+  source      ActivitySource
+  externalId  String?        @map("external_id")
+  startedAt   DateTime       @map("started_at")
+  durationSec Int            @map("duration_sec")
+  distanceM   Float?         @map("distance_m")
+  calories    Int?
+  avgHr       Float?         @map("avg_hr")
+  maxHr       Float?         @map("max_hr")
+  avgPace     Float?         @map("avg_pace")
+  avgPower    Float?         @map("avg_power")
+  summaryData Json?          @map("summary_data") @db.JsonB
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+
+  athlete   Athlete          @relation(fields: [athleteId], references: [id], onDelete: Cascade)
+  session   PlanSession?     @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  sportType SportType        @relation(fields: [sportTypeId], references: [id], onDelete: Restrict)
+  laps      ActivityLap[]
+  streams   ActivityStream[]
+
+  @@index([athleteId, startedAt])
+  @@map("activities")
+}
+
+model ActivityLap {
+  id          Int    @id @default(autoincrement())
+  activityId  Int    @map("activity_id")
+  lapNumber   Int    @map("lap_number")
+  distanceM   Float  @map("distance_m")
+  durationSec Int    @map("duration_sec")
+  avgHr       Float? @map("avg_hr")
+  avgPace     Float? @map("avg_pace")
+  avgPower    Float? @map("avg_power")
+
+  activity Activity @relation(fields: [activityId], references: [id], onDelete: Cascade)
+
+  @@map("activity_laps")
+}
+
+model ActivityStream {
+  id         Int        @id @default(autoincrement())
+  activityId Int        @map("activity_id")
+  streamType StreamType @map("stream_type")
+  dataPoints Json       @map("data_points") @db.JsonB
+
+  activity Activity @relation(fields: [activityId], references: [id], onDelete: Cascade)
+
+  @@unique([activityId, streamType])
+  @@map("activity_streams")
+}
+
+// ─── Wearables & Body Metrics ────────────────────────────
+
+enum WearableProvider {
+  GARMIN
+  STRAVA
+  WAHOO
+}
+
+model WearableConnection {
+  id             Int              @id @default(autoincrement())
+  athleteId      Int              @map("athlete_id")
+  provider       WearableProvider
+  accessToken    String           @map("access_token")
+  refreshToken   String?          @map("refresh_token")
+  tokenExpiresAt DateTime?        @map("token_expires_at")
+  lastSyncAt     DateTime?        @map("last_sync_at")
+
+  athlete Athlete @relation(fields: [athleteId], references: [id], onDelete: Cascade)
+
+  @@unique([athleteId, provider])
+  @@map("wearable_connections")
+}
+
+model BodyMetric {
+  id          Int      @id @default(autoincrement())
+  athleteId   Int      @map("athlete_id")
+  recordedAt  DateTime @map("recorded_at")
+  weightKg    Float?   @map("weight_kg")
+  bodyFatPct  Float?   @map("body_fat_pct")
+  restingHr   Int?     @map("resting_hr")
+  vo2max      Float?
+  hrvMs       Float?   @map("hrv_ms")
+  sleepHours  Float?   @map("sleep_hours")
+  notes       String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  athlete Athlete @relation(fields: [athleteId], references: [id], onDelete: Cascade)
+
+  @@index([athleteId, recordedAt])
+  @@map("body_metrics")
+}
+
+// ─── Readiness ───────────────────────────────────────────
+
+model Readiness {
+  id         Int      @id @default(autoincrement())
+  athleteId  Int      @map("athlete_id")
+  recordedAt DateTime @map("recorded_at")
+  overall    Int
+  sleep      Int
+  hrv        Int
+  soreness   Int
+  mood       Int
+  nutrition  Int
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  athlete Athlete @relation(fields: [athleteId], references: [id], onDelete: Cascade)
+
+  @@index([athleteId, recordedAt])
+  @@map("readiness")
+}
+
+// ─── Training Load Snapshots ─────────────────────────────
+
+enum LoadTrend {
+  UP
+  DOWN
+  FLAT
+}
+
+model TrainingLoadSnapshot {
+  id        Int       @id @default(autoincrement())
+  athleteId Int       @map("athlete_id")
+  weekStart DateTime  @map("week_start") @db.Date
+  acute     Float
+  chronic   Float
+  acwr      Float
+  monotony  Float
+  strain    Float
+  trend     LoadTrend
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  athlete Athlete @relation(fields: [athleteId], references: [id], onDelete: Cascade)
+
+  @@unique([athleteId, weekStart])
+  @@map("training_load_snapshots")
+}
